@@ -1,0 +1,6 @@
+data/dev.freyja_lynx.Branches.desktop.in.in
+data/dev.freyja_lynx.Branches.gschema.xml.in
+data/dev.freyja_lynx.Branches.metainfo.xml.in.in
+data/resources/ui/shortcuts.ui
+data/resources/ui/window.ui
+src/application.rs
