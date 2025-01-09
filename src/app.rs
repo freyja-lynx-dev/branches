@@ -1,3 +1,4 @@
+use relm4::prelude::AsyncComponent;
 use relm4::{
     actions::{RelmAction, RelmActionGroup},
     adw, gtk, main_application, Component, ComponentController, ComponentParts, ComponentSender,
@@ -5,19 +6,26 @@ use relm4::{
 };
 
 use gtk::prelude::{
-    ApplicationExt, ApplicationWindowExt, GtkWindowExt, OrientableExt, SettingsExt, WidgetExt,
+    ApplicationExt, ApplicationWindowExt, EntryExt, GtkWindowExt, OrientableExt, SettingsExt,
+    WidgetExt,
 };
 use gtk::{gio, glib};
+
+use atrium_api::agent::{store::MemorySessionStore, AtpAgent};
+use atrium_api::*;
+use atrium_xrpc_client::reqwest::ReqwestClient;
 
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
 
 pub(super) struct App {
     about_dialog: Controller<AboutDialog>,
+    atp_agent: AtpAgent<MemorySessionStore, ReqwestClient>,
 }
 
 #[derive(Debug)]
 pub(super) enum AppMsg {
+    Display,
     Quit,
 }
 
@@ -26,8 +34,8 @@ relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences"
 relm4::new_stateless_action!(pub(super) ShortcutsAction, WindowActionGroup, "show-help-overlay");
 relm4::new_stateless_action!(AboutAction, WindowActionGroup, "about");
 
-#[relm4::component(pub)]
-impl SimpleComponent for App {
+#[relm4::component(pub, async)]
+impl AsyncComponent for App {
     type Init = ();
     type Input = AppMsg;
     type Output = ();
@@ -73,10 +81,13 @@ impl SimpleComponent for App {
 
                 adw::HeaderBar {
                     #[wrap(Some)]
-                    set_title_widget = &gtk::SearchEntry {
+                    set_title_widget = &gtk::Entry {
+                            set_icon_from_icon_name: (gtk::EntryIconPosition::Primary, Some("edit-find-symbolic")),
                             set_width_request: 300,
                             set_hexpand: true,
-                            set_key_capture_widget: Some(&main_window)
+                            connect_activate[sender] => move |_| {
+                                sender.input(AppMsg::Display)
+                            }
                     },
                     pack_end = &gtk::MenuButton {
                         set_icon_name: "open-menu-symbolic",
@@ -102,7 +113,15 @@ impl SimpleComponent for App {
             .launch(())
             .detach();
 
-        let model = Self { about_dialog };
+        let atp_agent: AtpAgent<MemorySessionStore, _> = AtpAgent::new(
+            ReqwestClient::new("https://bsky.social"),
+            MemorySessionStore::default(),
+        );
+
+        let model = Self {
+            about_dialog,
+            atp_agent,
+        };
 
         let widgets = view_output!();
 
@@ -131,8 +150,28 @@ impl SimpleComponent for App {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+    async fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
         match message {
+            AppMsg::Display => {
+                let res = match self
+                    .atp_agent
+                    .api
+                    .com
+                    .atproto
+                    .identity
+                    .resolve_handle(
+                        atrium_api::com::atproto::identity::resolve_handle::ParametersData {
+                            handle: atrium_api::types::string::Handle::from("freyja-lynx.dev"),
+                        }
+                        .into(),
+                    )
+                    .await
+                {
+                    Ok(r) => r.data.did,
+                    Err(e) => "not found",
+                };
+                println!("{:?}", res)
+            }
             AppMsg::Quit => main_application().quit(),
         }
     }
