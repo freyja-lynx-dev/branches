@@ -5,7 +5,7 @@ use relm4::{
 };
 
 use gtk::prelude::{
-    ApplicationExt, ApplicationWindowExt, GtkWindowExt, OrientableExt, SettingsExt, WidgetExt, 
+    ApplicationExt, ApplicationWindowExt, GtkWindowExt, OrientableExt, SettingsExt, WidgetExt,
 };
 use gtk::{gio, glib};
 
@@ -73,13 +73,10 @@ impl SimpleComponent for App {
 
                 adw::HeaderBar {
                     #[wrap(Some)]
-                    set_title_widget = &gtk::SearchBar {
-                        set_search_mode: true,
-                        set_width_request: 300,
-                        connect_entry = &gtk::SearchEntry {
+                    set_title_widget = &gtk::SearchEntry {
+                            set_width_request: 300,
                             set_hexpand: true,
                             set_key_capture_widget: Some(&main_window)
-                        },
                     },
                     pack_end = &gtk::MenuButton {
                         set_icon_name: "open-menu-symbolic",
