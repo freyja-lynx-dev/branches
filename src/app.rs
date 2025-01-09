@@ -7,7 +7,7 @@ use relm4::{
 use gtk::prelude::{
     ApplicationExt, ApplicationWindowExt, GtkWindowExt, OrientableExt, SettingsExt, WidgetExt, 
 };
-use gtk::{gio, glib,};
+use gtk::{gio, glib};
 
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
