@@ -1,7 +1,7 @@
 use gtk::prelude::GtkWindowExt;
 use relm4::{adw, gtk, ComponentParts, ComponentSender, SimpleComponent};
 
-use crate::config::{APP_ID, VERSION};
+use crate::config::{APP_ID, GETTEXT_PACKAGE, VERSION};
 
 pub struct AboutDialog {}
 
@@ -22,10 +22,10 @@ impl SimpleComponent for AboutDialog {
             // Insert your Issues page
             // .issue_url("https://gitlab.gnome.org/World/Rust/branches/-/issues")
             // Insert your application name here
-            .application_name("Relm4-template")
+            .application_name(GETTEXT_PACKAGE)
             .version(VERSION)
             .translator_credits("translator-credits")
-            .copyright("© 2023 freyja-lynx")
+            .copyright("© 2024 freyja-lynx")
             .developers(vec!["freyja-lynx"])
             .designers(vec!["freyja-lynx"])
             .hide_on_close(true)
