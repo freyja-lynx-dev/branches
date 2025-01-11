@@ -2,6 +2,7 @@
 mod config;
 mod app;
 mod modals;
+mod recordview;
 
 use config::{APP_ID, GETTEXT_PACKAGE, LOCALEDIR, RESOURCES_FILE};
 use gettextrs::{gettext, LocaleCategory};
@@ -63,5 +64,5 @@ fn main() {
         )
         .unwrap();
     app.set_global_css(&glib::GString::from_utf8_checked(data.to_vec()).unwrap());
-    app.visible_on_activate(false).run::<App>(());
+    app.visible_on_activate(false).run::<App>(0);
 }

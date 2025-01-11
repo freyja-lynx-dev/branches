@@ -1,13 +1,16 @@
-use relm4::prelude::AsyncComponent;
 use relm4::{
     actions::{RelmAction, RelmActionGroup},
-    adw, gtk, main_application, Component, ComponentController, ComponentParts, ComponentSender,
-    Controller, SimpleComponent,
+    adw,
+    factory::FactoryVecDeque,
+    gtk, main_application,
+    prelude::DynamicIndex,
+    Component, ComponentController, ComponentParts, ComponentSender, Controller, RelmWidgetExt,
+    SimpleComponent,
 };
 
 use gtk::prelude::{
-    ApplicationExt, ApplicationWindowExt, EntryExt, GtkWindowExt, OrientableExt, SettingsExt,
-    WidgetExt,
+    ApplicationExt, ApplicationWindowExt, ButtonExt, EntryExt, GtkWindowExt, OrientableExt,
+    SettingsExt, WidgetExt,
 };
 use gtk::{gio, glib};
 
@@ -17,15 +20,29 @@ use atrium_xrpc_client::reqwest::ReqwestClient;
 
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
+use crate::recordview::{Counter, CounterOutput};
 
 pub(super) struct App {
     about_dialog: Controller<AboutDialog>,
     atp_agent: AtpAgent<MemorySessionStore, ReqwestClient>,
+    counters: FactoryVecDeque<Counter>,
+    created_widgets: u8,
 }
 
+// #[derive(Debug)]
+// pub(super) enum AppMsg {
+//     Retrieve,
+//     Quit,
+// }
+
 #[derive(Debug)]
-pub(super) enum AppMsg {
-    Display,
+pub enum AppMsg {
+    DisplayOverview,
+    AddCounter,
+    RemoveCounter,
+    SendFront(DynamicIndex),
+    MoveUp(DynamicIndex),
+    MoveDown(DynamicIndex),
     Quit,
 }
 
@@ -34,9 +51,9 @@ relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences"
 relm4::new_stateless_action!(pub(super) ShortcutsAction, WindowActionGroup, "show-help-overlay");
 relm4::new_stateless_action!(AboutAction, WindowActionGroup, "about");
 
-#[relm4::component(pub, async)]
-impl AsyncComponent for App {
-    type Init = ();
+#[relm4::component(pub)]
+impl SimpleComponent for App {
+    type Init = u8;
     type Input = AppMsg;
     type Output = ();
     type Widgets = AppWidgets;
@@ -75,36 +92,65 @@ impl AsyncComponent for App {
                 } else {
                     None
                 },
+            #[name = "tab_overview"]
+            adw::TabOverview {
+                set_enable_new_tab: true,
+                set_view: Some(tab_view),
+                #[wrap(Some)]
+                set_child = &gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
 
-            gtk::Box {
-                set_orientation: gtk::Orientation::Vertical,
+                    adw::HeaderBar {
+                        pack_start = &gtk::Button {
+                            set_label: "Add",
+                            connect_clicked => AppMsg::AddCounter,
+                        },
 
-                adw::HeaderBar {
-                    #[wrap(Some)]
-                    set_title_widget = &gtk::Entry {
-                            set_icon_from_icon_name: (gtk::EntryIconPosition::Primary, Some("edit-find-symbolic")),
-                            set_width_request: 300,
-                            set_hexpand: true,
-                            connect_activate[sender] => move |_| {
-                                sender.input(AppMsg::Display)
+                        pack_start = &gtk::Button {
+                            set_label: "Remove",
+                            connect_clicked => AppMsg::RemoveCounter,
+                        },
+                        #[wrap(Some)]
+                        set_title_widget = &gtk::Box {
+                            gtk::Entry {
+                                set_icon_from_icon_name: (gtk::EntryIconPosition::Primary, Some("edit-find-symbolic")),
+                                set_width_request: 300,
+                                set_hexpand: true,
+                                // connect_activate[sender] => move |_| {
+                                //     sender.input(AppMsg::Retrieve)
+                                // }
+                            },
+                            adw::TabButton {
+                                set_view: Some(tab_view),
+                                connect_clicked => AppMsg::DisplayOverview,
                             }
+                        },
+                        pack_end = &gtk::MenuButton {
+                            set_icon_name: "open-menu-symbolic",
+                            set_menu_model: Some(&primary_menu),
+                        }
                     },
-                    pack_end = &gtk::MenuButton {
-                        set_icon_name: "open-menu-symbolic",
-                        set_menu_model: Some(&primary_menu),
+                    // adw::TabBar {
+                    //     set_view: Some(tab_view),
+                    //     set_autohide: false,
+                    // },
+                    #[local_ref]
+                    tab_view -> adw::TabView {
+                        set_margin_all: 5,
+                        set_vexpand: true,
+                    },
+                    gtk::Label {
+                        set_label: "Browse public AT Protocol data",
                     }
-                },
-                gtk::Label {
-                    set_label: "Browse public AT Protocol data",
-                    set_vexpand: true,
                 }
+
             }
 
         }
     }
 
     fn init(
-        _init: Self::Init,
+        counter: Self::Init,
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
@@ -118,10 +164,21 @@ impl AsyncComponent for App {
             MemorySessionStore::default(),
         );
 
+        let counters = FactoryVecDeque::builder()
+            .launch(adw::TabView::default())
+            .forward(sender.input_sender(), |output| match output {
+                CounterOutput::SendFront(index) => AppMsg::SendFront(index),
+                CounterOutput::MoveUp(index) => AppMsg::MoveUp(index),
+                CounterOutput::MoveDown(index) => AppMsg::MoveDown(index),
+            });
         let model = Self {
             about_dialog,
             atp_agent,
+            created_widgets: counter,
+            counters,
         };
+
+        let tab_view = model.counters.widget();
 
         let widgets = view_output!();
 
@@ -150,30 +207,65 @@ impl AsyncComponent for App {
         ComponentParts { model, widgets }
     }
 
-    async fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+        let mut counters_guard = self.counters.guard();
+
         match message {
-            AppMsg::Display => {
-                let res = match self
-                    .atp_agent
-                    .api
-                    .com
-                    .atproto
-                    .identity
-                    .resolve_handle(
-                        atrium_api::com::atproto::identity::resolve_handle::ParametersData {
-                            handle: atrium_api::types::string::Handle::from("freyja-lynx.dev"),
-                        }
-                        .into(),
-                    )
-                    .await
-                {
-                    Ok(r) => r.data.did,
-                    Err(e) => "not found",
-                };
-                println!("{:?}", res)
+            AppMsg::DisplayOverview => {
+                println!("not implemented")
+                //self.tab_overview.set_open(true);
+            }
+            AppMsg::AddCounter => {
+                counters_guard.push_back(self.created_widgets);
+                self.created_widgets = self.created_widgets.wrapping_add(1);
+            }
+            AppMsg::RemoveCounter => {
+                counters_guard.pop_back();
+            }
+            AppMsg::SendFront(index) => {
+                counters_guard.move_front(index.current_index());
+            }
+            AppMsg::MoveDown(index) => {
+                let index = index.current_index();
+                let new_index = index + 1;
+                // Already at the end?
+                if new_index < counters_guard.len() {
+                    counters_guard.move_to(index, new_index);
+                }
+            }
+            AppMsg::MoveUp(index) => {
+                let index = index.current_index();
+                // Already at the start?
+                if index != 0 {
+                    counters_guard.move_to(index, index - 1);
+                }
             }
             AppMsg::Quit => main_application().quit(),
         }
+        // match message {
+        //     AppMsg::Retrieve => {
+        //         println!("not implemented")
+        //         // let res = match self
+        //         //     .atp_agent
+        //         //     .api
+        //         //     .com
+        //         //     .atproto
+        //         //     .identity
+        //         //     .resolve_handle(
+        //         //         atrium_api::com::atproto::identity::resolve_handle::ParametersData {
+        //         //             handle: atrium_api::types::string::Handle::from("freyja-lynx.dev"),
+        //         //         }
+        //         //         .into(),
+        //         //     )
+        //         //     .await
+        //         // {
+        //         //     Ok(r) => r.data.did,
+        //         //     Err(e) => "not found",
+        //         // };
+        //         // println!("{:?}", res)
+        //     }
+        //     AppMsg::Quit => main_application().quit(),
+        // }
     }
 
     fn shutdown(&mut self, widgets: &mut Self::Widgets, _output: relm4::Sender<Self::Output>) {
