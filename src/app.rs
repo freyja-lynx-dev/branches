@@ -52,7 +52,8 @@ relm4::new_stateless_action!(pub(super) ShortcutsAction, WindowActionGroup, "sho
 relm4::new_stateless_action!(AboutAction, WindowActionGroup, "about");
 
 #[relm4::component(pub)]
-impl SimpleComponent for App {
+impl Component for App {
+    type CommandOutput = ();
     type Init = u8;
     type Input = AppMsg;
     type Output = ();
@@ -207,13 +208,18 @@ impl SimpleComponent for App {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, message: Self::Input, _sender: ComponentSender<Self>) {
+    fn update_with_view(
+        &mut self,
+        widgets: &mut Self::Widgets,
+        message: Self::Input,
+        _sender: ComponentSender<Self>,
+        _root: &Self::Root,
+    ) {
         let mut counters_guard = self.counters.guard();
 
         match message {
             AppMsg::DisplayOverview => {
-                println!("not implemented")
-                //self.tab_overview.set_open(true);
+                widgets.tab_overview.set_open(true);
             }
             AppMsg::AddCounter => {
                 counters_guard.push_back(self.created_widgets);
