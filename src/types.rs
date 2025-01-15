@@ -1,15 +1,19 @@
+use atrium_api::types::string::{AtIdentifier, Nsid, RecordKey};
 use std::str::FromStr;
 
 #[derive(Debug)]
 pub enum AtUriError {
-    MissingIdentifier,
+    MissingAuthority,
+    InvalidAuthority,
+    InvalidNsid,
+    InvalidRecordKey,
 }
 
 #[derive(Debug)]
 pub struct AtUri {
-    pub authority: String,
-    pub collection: Option<String>,
-    pub rkey: Option<String>,
+    pub authority: AtIdentifier,
+    pub collection: Option<Nsid>,
+    pub rkey: Option<RecordKey>,
 }
 
 impl FromStr for AtUri {
@@ -34,13 +38,24 @@ impl FromStr for AtUri {
         - i can't even think of the questions i'm so tired
         - maybe i'll have better brain tomorrow
         */
-        let authority: String = components
+        let authority = components
             .first()
-            .ok_or(AtUriError::MissingIdentifier)?
-            .to_string();
+            .ok_or(AtUriError::MissingAuthority)?
+            .to_string()
+            .parse::<AtIdentifier>()
+            .map_err(|_| AtUriError::InvalidAuthority)?;
 
-        let collection = components.get(1).map(|s| s.to_string());
-        let rkey = components.get(2).map(|s| s.to_string());
+        let collection = components
+            .get(1)
+            .map(|s| s.to_string().parse::<Nsid>())
+            .transpose()
+            .map_err(|_| AtUriError::InvalidNsid)?;
+
+        let rkey = components
+            .get(2)
+            .map(|s| s.to_string().parse::<RecordKey>())
+            .transpose()
+            .map_err(|_| AtUriError::InvalidRecordKey)?;
 
         Ok(AtUri {
             authority,
@@ -52,15 +67,15 @@ impl FromStr for AtUri {
 
 impl std::fmt::Display for AtUri {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut uri = self.authority.clone();
-        match self.collection.clone() {
+        let mut uri = String::from(self.authority.as_ref());
+        match self.collection.as_ref() {
             Some(s) => {
                 uri.push('/');
                 uri.push_str(s.as_str())
             }
             None => (),
         };
-        match self.rkey.clone() {
+        match self.rkey.as_ref() {
             Some(s) => {
                 uri.push('/');
                 uri.push_str(s.as_str())
