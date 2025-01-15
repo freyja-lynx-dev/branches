@@ -1,8 +1,10 @@
 #[rustfmt::skip]
 mod config;
 mod app;
+mod client;
 mod modals;
 mod recordview;
+mod types;
 
 use config::{APP_ID, GETTEXT_PACKAGE, LOCALEDIR, RESOURCES_FILE};
 use gettextrs::{gettext, LocaleCategory};

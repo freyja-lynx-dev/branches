@@ -150,6 +150,7 @@ dependencies = [
  "atrium-api",
  "atrium-xrpc-client",
  "gettext-rs",
+ "http",
  "relm4",
  "tokio",
  "tracing",

@@ -1,11 +1,14 @@
+use std::convert::identity;
+
 use relm4::{
     actions::{RelmAction, RelmActionGroup},
     adw,
     factory::FactoryVecDeque,
-    gtk, main_application,
+    gtk::{self, prelude::EntryBufferExtManual},
+    main_application,
     prelude::DynamicIndex,
     Component, ComponentController, ComponentParts, ComponentSender, Controller, RelmWidgetExt,
-    SimpleComponent,
+    SimpleComponent, WorkerController,
 };
 
 use gtk::prelude::{
@@ -14,19 +17,19 @@ use gtk::prelude::{
 };
 use gtk::{gio, glib};
 
-use atrium_api::agent::{store::MemorySessionStore, AtpAgent};
 use atrium_api::*;
-use atrium_xrpc_client::reqwest::ReqwestClient;
 
+use crate::client::*;
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
 use crate::recordview::{Counter, CounterOutput};
 
 pub(super) struct App {
     about_dialog: Controller<AboutDialog>,
-    atp_agent: AtpAgent<MemorySessionStore, ReqwestClient>,
+    entry: gtk::EntryBuffer,
     counters: FactoryVecDeque<Counter>,
     created_widgets: u8,
+    atp_client: WorkerController<AtprotoClient>,
 }
 
 // #[derive(Debug)]
@@ -43,6 +46,10 @@ pub enum AppMsg {
     SendFront(DynamicIndex),
     MoveUp(DynamicIndex),
     MoveDown(DynamicIndex),
+    Retrieve,
+    // TabForRecord(com::atproto::repo::get_record::Output),
+    // TabForRepo(com::atproto::repo::describe_repo::Output),
+    NotImplemented,
     Quit,
 }
 
@@ -113,13 +120,14 @@ impl Component for App {
                         },
                         #[wrap(Some)]
                         set_title_widget = &gtk::Box {
+                            #[name(search_entry)]
                             gtk::Entry {
                                 set_icon_from_icon_name: (gtk::EntryIconPosition::Primary, Some("edit-find-symbolic")),
                                 set_width_request: 300,
                                 set_hexpand: true,
-                                // connect_activate[sender] => move |_| {
-                                //     sender.input(AppMsg::Retrieve)
-                                // }
+                                set_tooltip_text: Some("Enter a handle, did, or at:// URI"),
+                                set_buffer: &model.entry,
+                                connect_activate => AppMsg::Retrieve,
                             },
                             adw::TabButton {
                                 set_view: Some(tab_view),
@@ -131,10 +139,6 @@ impl Component for App {
                             set_menu_model: Some(&primary_menu),
                         }
                     },
-                    // adw::TabBar {
-                    //     set_view: Some(tab_view),
-                    //     set_autohide: false,
-                    // },
                     #[local_ref]
                     tab_view -> adw::TabView {
                         set_margin_all: 5,
@@ -160,11 +164,6 @@ impl Component for App {
             .launch(())
             .detach();
 
-        let atp_agent: AtpAgent<MemorySessionStore, _> = AtpAgent::new(
-            ReqwestClient::new("https://bsky.social"),
-            MemorySessionStore::default(),
-        );
-
         let counters = FactoryVecDeque::builder()
             .launch(adw::TabView::default())
             .forward(sender.input_sender(), |output| match output {
@@ -174,9 +173,17 @@ impl Component for App {
             });
         let model = Self {
             about_dialog,
-            atp_agent,
+            entry: gtk::EntryBuffer::default(),
             created_widgets: counter,
             counters,
+            atp_client: AtprotoClient::builder().detach_worker(()).forward(
+                sender.input_sender(),
+                |output| match output {
+                    AtprotoClientOutput::Record(record) => AppMsg::NotImplemented,
+                    AtprotoClientOutput::Repo(repo) => AppMsg::NotImplemented,
+                    AtprotoClientOutput::Error(err) => AppMsg::NotImplemented,
+                },
+            ),
         };
 
         let tab_view = model.counters.widget();
@@ -212,12 +219,17 @@ impl Component for App {
         &mut self,
         widgets: &mut Self::Widgets,
         message: Self::Input,
-        _sender: ComponentSender<Self>,
-        _root: &Self::Root,
+        sender: ComponentSender<Self>,
+        root: &Self::Root,
     ) {
         let mut counters_guard = self.counters.guard();
 
         match message {
+            AppMsg::Retrieve => {
+                let text = self.entry.text();
+                self.atp_client
+                    .emit(AtprotoClientInput::Get(text.to_string()));
+            }
             AppMsg::DisplayOverview => {
                 widgets.tab_overview.set_open(true);
             }
@@ -246,6 +258,7 @@ impl Component for App {
                     counters_guard.move_to(index, index - 1);
                 }
             }
+            AppMsg::NotImplemented => println!("not implemented"),
             AppMsg::Quit => main_application().quit(),
         }
         // match message {
