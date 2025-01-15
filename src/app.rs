@@ -1,5 +1,3 @@
-use std::convert::identity;
-
 use relm4::{
     actions::{RelmAction, RelmActionGroup},
     adw,
