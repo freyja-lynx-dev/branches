@@ -1,7 +1,7 @@
 #[rustfmt::skip]
 mod config;
 mod app;
-mod client;
+//mod client;
 mod modals;
 mod recordview;
 mod types;
@@ -66,5 +66,5 @@ fn main() {
         )
         .unwrap();
     app.set_global_css(&glib::GString::from_utf8_checked(data.to_vec()).unwrap());
-    app.visible_on_activate(false).run::<App>(0);
+    app.visible_on_activate(false).run_async::<App>(0);
 }
