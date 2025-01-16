@@ -1,3 +1,4 @@
+use relm4::component::{AsyncComponent, AsyncComponentParts, AsyncComponentSender};
 use relm4::{
     actions::{RelmAction, RelmActionGroup},
     adw,
@@ -15,19 +16,23 @@ use gtk::prelude::{
 };
 use gtk::{gio, glib};
 
+use atrium_api::agent::{store::MemorySessionStore, AtpAgent};
+use atrium_api::xrpc::Result as AtResult;
 use atrium_api::*;
+use atrium_xrpc_client::reqwest::ReqwestClient;
+use tokio::sync::oneshot;
 
-use crate::client::*;
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
 use crate::recordview::{Counter, CounterOutput};
+use crate::types::*;
 
 pub(super) struct App {
     about_dialog: Controller<AboutDialog>,
     entry: gtk::EntryBuffer,
     counters: FactoryVecDeque<Counter>,
     created_widgets: u8,
-    atp_client: WorkerController<AtprotoClient>,
+    atp_client: AtpAgent<MemorySessionStore, ReqwestClient>, /*WorkerController<AtprotoClient>*/
 }
 
 // #[derive(Debug)]
@@ -45,10 +50,27 @@ pub enum AppMsg {
     MoveUp(DynamicIndex),
     MoveDown(DynamicIndex),
     Retrieve,
-    // TabForRecord(com::atproto::repo::get_record::Output),
-    // TabForRepo(com::atproto::repo::describe_repo::Output),
+    // TabForRecord(com::atproto::repo::get_record::OutputData),
+    // TabForRecords(com::atproto::repo::list_records::OutputData),
+    // TabForRepo(com::atproto::repo::describe_repo::OutputData),
     NotImplemented,
     Quit,
+}
+
+#[derive(Debug)]
+pub enum AppCommand {
+    GetRecord(
+        AtResult<com::atproto::repo::get_record::Output, com::atproto::repo::get_record::Error>,
+    ),
+    ListRecords(
+        AtResult<com::atproto::repo::list_records::Output, com::atproto::repo::list_records::Error>,
+    ),
+    DescribeRepo(
+        AtResult<
+            com::atproto::repo::describe_repo::Output,
+            com::atproto::repo::describe_repo::Error,
+        >,
+    ),
 }
 
 relm4::new_action_group!(pub(super) WindowActionGroup, "win");
@@ -56,9 +78,9 @@ relm4::new_stateless_action!(PreferencesAction, WindowActionGroup, "preferences"
 relm4::new_stateless_action!(pub(super) ShortcutsAction, WindowActionGroup, "show-help-overlay");
 relm4::new_stateless_action!(AboutAction, WindowActionGroup, "about");
 
-#[relm4::component(pub)]
-impl Component for App {
-    type CommandOutput = ();
+#[relm4::component(pub, async)]
+impl AsyncComponent for App {
+    type CommandOutput = AppCommand;
     type Init = u8;
     type Input = AppMsg;
     type Output = ();
@@ -152,11 +174,11 @@ impl Component for App {
         }
     }
 
-    fn init(
+    async fn init(
         counter: Self::Init,
         root: Self::Root,
-        sender: ComponentSender<Self>,
-    ) -> ComponentParts<Self> {
+        sender: AsyncComponentSender<Self>,
+    ) -> AsyncComponentParts<Self> {
         let about_dialog = AboutDialog::builder()
             .transient_for(&root)
             .launch(())
@@ -174,14 +196,30 @@ impl Component for App {
             entry: gtk::EntryBuffer::default(),
             created_widgets: counter,
             counters,
-            atp_client: AtprotoClient::builder().detach_worker(()).forward(
-                sender.input_sender(),
-                |output| match output {
-                    AtprotoClientOutput::Record(record) => AppMsg::NotImplemented,
-                    AtprotoClientOutput::Repo(repo) => AppMsg::NotImplemented,
-                    AtprotoClientOutput::Error(err) => AppMsg::NotImplemented,
-                },
-            ),
+            atp_client: AtpAgent::new(
+                ReqwestClient::new("https://public.api.bsky.app"),
+                MemorySessionStore::default(),
+            ), /*AtprotoClient::builder().detach_worker(()).forward(
+                   sender.input_sender(),
+                   |output| match output {
+                       AtprotoClientOutput::Record(record) => {
+                           println!("record: {:?}", record);
+                           AppMsg::NotImplemented
+                       }
+                       AtprotoClientOutput::Records(records) => {
+                           println!("records: {:?}", records);
+                           AppMsg::NotImplemented
+                       }
+                       AtprotoClientOutput::Repo(repo) => {
+                           println!("repo: {:?}", repo);
+                           AppMsg::NotImplemented
+                       }
+                       AtprotoClientOutput::Error(err) => {
+                           println!("error: {:?}", err);
+                           AppMsg::NotImplemented
+                       }
+                   },
+               )*/
         };
 
         let tab_view = model.counters.widget();
@@ -210,23 +248,111 @@ impl Component for App {
 
         widgets.load_window_size();
 
-        ComponentParts { model, widgets }
+        AsyncComponentParts { model, widgets }
     }
 
-    fn update_with_view(
+    async fn update_with_view(
         &mut self,
         widgets: &mut Self::Widgets,
         message: Self::Input,
-        sender: ComponentSender<Self>,
+        sender: AsyncComponentSender<Self>,
         root: &Self::Root,
     ) {
         let mut counters_guard = self.counters.guard();
 
+        // in the future it might be best to move from creating oneshots every command to having mpsc channels for each command
+        // for now, this is fine
         match message {
             AppMsg::Retrieve => {
-                let text = self.entry.text();
-                self.atp_client
-                    .emit(AtprotoClientInput::Get(text.to_string()));
+                if let Ok(uri) = self.entry.text().to_string().parse::<AtUri>() {
+                    match (uri.collection, uri.rkey) {
+                        (Some(collection), Some(rkey)) => {
+                            let (tx, rx) = oneshot::channel();
+                            tx.send(
+                                self.atp_client
+                                    .api
+                                    .com
+                                    .atproto
+                                    .repo
+                                    .get_record(
+                                        com::atproto::repo::get_record::ParametersData {
+                                            repo: uri.authority,
+                                            collection,
+                                            rkey: String::from(rkey),
+                                            cid: None, // TODO: offer some way to use CIDs for older versions of record
+                                        }
+                                        .into(),
+                                    )
+                                    .await,
+                            )
+                            .ok();
+                            sender.oneshot_command(async {
+                                AppCommand::GetRecord(
+                                    rx.await.expect("we should have received a response"),
+                                )
+                            })
+                        }
+                        (Some(collection), None) => {
+                            let (tx, rx) = oneshot::channel();
+                            tx.send(
+                                self.atp_client
+                                    .api
+                                    .com
+                                    .atproto
+                                    .repo
+                                    .list_records(
+                                        com::atproto::repo::list_records::ParametersData {
+                                            repo: uri.authority,
+                                            collection,
+                                            cursor: None, // TODO: use cursor to paginate
+                                            // TODO: these should be user configurable
+                                            reverse: None,
+                                            limit: None,
+                                            // these are deprecated, but still in the struct
+                                            rkey_end: None,
+                                            rkey_start: None,
+                                        }
+                                        .into(),
+                                    )
+                                    .await,
+                            )
+                            .ok();
+                            sender.oneshot_command(async {
+                                AppCommand::ListRecords(
+                                    rx.await.expect("we should have received a response"),
+                                )
+                            })
+                        }
+                        (None, _) => {
+                            let (tx, rx) = oneshot::channel();
+                            tx.send(
+                                self.atp_client
+                                    .api
+                                    .com
+                                    .atproto
+                                    .repo
+                                    .describe_repo(
+                                        com::atproto::repo::describe_repo::ParametersData {
+                                            repo: uri.authority,
+                                        }
+                                        .into(),
+                                    )
+                                    .await,
+                            )
+                            .ok();
+                            sender.oneshot_command(async {
+                                AppCommand::DescribeRepo(
+                                    rx.await.expect("we should have received a response"),
+                                )
+                            })
+                        }
+                    }
+                } else {
+                    println!("not a valid URI"); // TODO create a toast to represent this error
+                }
+
+                // self.atp_client
+                //     .emit(AtprotoClientInput::Get(text.to_string()));
             }
             AppMsg::DisplayOverview => {
                 widgets.tab_overview.set_open(true);

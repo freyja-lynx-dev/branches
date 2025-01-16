@@ -27,17 +27,7 @@ impl FromStr for AtUri {
             .unwrap_or(s)
             .splitn(3, '/')
             .collect::<Vec<&str>>();
-        /* alright so here's where i'm leaving off bc i'm sleepy
-        i want FromStr to validate the URI components, but only the handle/did is required
-        so we need to ensure that there is a valid identifier (and error if not), then see if
-        there is a valid nsid and rkey, putting them there if valid, and returning None if not
 
-        some questions:
-        - this should probably be in its own file and exported as a type
-        - do i just match nsid and rkey and transform the err into a None?
-        - i can't even think of the questions i'm so tired
-        - maybe i'll have better brain tomorrow
-        */
         let authority = components
             .first()
             .ok_or(AtUriError::MissingAuthority)?
