@@ -17,11 +17,13 @@ use gtk::prelude::{
 use gtk::{gio, glib};
 
 use atrium_api::agent::{store::MemorySessionStore, AtpAgent};
+use atrium_api::types::string::{AtIdentifier, Did, Handle};
 use atrium_api::xrpc::Result as AtResult;
 use atrium_api::*;
 use atrium_xrpc_client::reqwest::ReqwestClient;
 use tokio::sync::oneshot;
 
+use crate::api::*;
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
 use crate::recordview::{Counter, CounterOutput};
@@ -265,6 +267,42 @@ impl AsyncComponent for App {
         match message {
             AppMsg::Retrieve => {
                 if let Ok(uri) = self.entry.text().to_string().parse::<AtUri>() {
+                    let authority = uri.authority.clone();
+                    let pds_url = match authority {
+                        AtIdentifier::Did(did) => match did.method() {
+                            "did:plc" => did_doc_from_plc_directory(&did).await,
+                            "did:web" => did_doc_from_web(&did).await,
+                            _ => Ok(None),
+                        },
+                        AtIdentifier::Handle(handle) => {
+                            let did = self
+                                .atp_client
+                                .api
+                                .com
+                                .atproto
+                                .identity
+                                .resolve_handle(
+                                    com::atproto::identity::resolve_handle::ParametersData {
+                                        handle: handle.clone(),
+                                    }
+                                    .into(),
+                                )
+                                .await
+                                .expect("we should have received a response")
+                                .data
+                                .did;
+                            match did.method() {
+                                "did:plc" => did_doc_from_plc_directory(&did).await,
+                                "did:web" => did_doc_from_web(&did).await,
+                                _ => Ok(None),
+                            }
+                        }
+                    }
+                    .transpose()
+                    .expect("we expect the user to provide a valid did, or handle that represents a did")
+                    .expect("we expect the lookup to work and provide a valid PDS");
+                    println!("pds_url: {:?}", pds_url);
+                    self.atp_client.configure_endpoint(pds_url);
                     match (uri.collection, uri.rkey) {
                         (Some(collection), Some(rkey)) => {
                             let (tx, rx) = oneshot::channel();
@@ -385,30 +423,6 @@ impl AsyncComponent for App {
             AppMsg::NotImplemented => println!("not implemented"),
             AppMsg::Quit => main_application().quit(),
         }
-        // match message {
-        //     AppMsg::Retrieve => {
-        //         println!("not implemented")
-        //         // let res = match self
-        //         //     .atp_agent
-        //         //     .api
-        //         //     .com
-        //         //     .atproto
-        //         //     .identity
-        //         //     .resolve_handle(
-        //         //         atrium_api::com::atproto::identity::resolve_handle::ParametersData {
-        //         //             handle: atrium_api::types::string::Handle::from("freyja-lynx.dev"),
-        //         //         }
-        //         //         .into(),
-        //         //     )
-        //         //     .await
-        //         // {
-        //         //     Ok(r) => r.data.did,
-        //         //     Err(e) => "not found",
-        //         // };
-        //         // println!("{:?}", res)
-        //     }
-        //     AppMsg::Quit => main_application().quit(),
-        // }
     }
 
     fn shutdown(&mut self, widgets: &mut Self::Widgets, _output: relm4::Sender<Self::Output>) {

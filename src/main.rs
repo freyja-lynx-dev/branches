@@ -1,7 +1,7 @@
 #[rustfmt::skip]
 mod config;
+mod api;
 mod app;
-//mod client;
 mod modals;
 mod recordview;
 mod types;
