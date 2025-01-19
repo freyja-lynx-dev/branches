@@ -33,6 +33,8 @@ pub enum AgentError {
     NoDidDoc(String),
     NoPdsEndpointFound(String),
     RecordNotFound(String),
+    RecordsNotFound(String),
+    RepoNotFound(String),
 }
 
 /*
@@ -126,18 +128,17 @@ impl AtprotoAgent {
             .describe_repo(com::atproto::repo::describe_repo::ParametersData { repo }.into())
             .await
     }
-    async fn set_pds_endpoint_for(&self, repo: AtIdentifier) -> Result<(), AgentError> {
-        let id = repo.clone();
+    async fn set_pds_endpoint_for(&self, repo: &AtIdentifier) -> Result<(), AgentError> {
         if let Ok(did) = match repo {
-            AtIdentifier::Did(did) => Ok(did),
-            AtIdentifier::Handle(handle) => self.did_from_handle(&handle).await,
+            AtIdentifier::Did(did) => Ok(did.to_owned()),
+            AtIdentifier::Handle(handle) => self.did_from_handle(handle).await,
         } {
             match get_pds_endpoint_for(&did).await {
                 Ok(endpoint) => Ok(self.agent.configure_endpoint(endpoint)),
                 Err(err) => Err(AgentError::NoPdsEndpointFound(err.to_string())),
             }
         } else {
-            Err(AgentError::InvalidIdentifier(String::from(id)))
+            Err(AgentError::InvalidIdentifier(String::from(repo.to_owned())))
         }
     }
 }
@@ -210,8 +211,7 @@ impl AsyncComponent for AtprotoAgent {
                 };
             }
             AgentInput::GetURI(uri) => {
-                let id = uri.authority.clone();
-                if let Err(err) = self.set_pds_endpoint_for(id).await {
+                if let Err(err) = self.set_pds_endpoint_for(&uri.authority).await {
                     sender.output(AgentOutput::Error(err));
                 } else {
                     match (uri.authority, uri.collection, uri.rkey) {
@@ -227,7 +227,7 @@ impl AsyncComponent for AtprotoAgent {
                             match self.list_records(repo, collection).await {
                                 Ok(records) => sender.output(AgentOutput::Records(records.data)),
                                 Err(err) => sender.output(AgentOutput::Error(
-                                    AgentError::RecordNotFound(err.to_string()),
+                                    AgentError::RecordsNotFound(err.to_string()),
                                 )),
                             };
                         }
@@ -235,7 +235,7 @@ impl AsyncComponent for AtprotoAgent {
                             match self.describe_repo(repo).await {
                                 Ok(repo) => sender.output(AgentOutput::Repo(repo.data)),
                                 Err(err) => sender.output(AgentOutput::Error(
-                                    AgentError::RecordNotFound(err.to_string()),
+                                    AgentError::RepoNotFound(err.to_string()),
                                 )),
                             };
                         }
