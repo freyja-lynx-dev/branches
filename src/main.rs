@@ -1,5 +1,6 @@
 #[rustfmt::skip]
 mod config;
+mod agent;
 mod api;
 mod app;
 mod modals;
