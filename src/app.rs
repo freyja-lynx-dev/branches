@@ -2,6 +2,7 @@ use relm4::component::{
     AsyncComponent, AsyncComponentController, AsyncComponentParts, AsyncComponentSender,
     AsyncController,
 };
+use relm4::factory::AsyncFactoryVecDeque;
 use relm4::{
     actions::{RelmAction, RelmActionGroup},
     adw,
@@ -26,13 +27,13 @@ use atrium_api::*;
 use crate::agent::{AgentInput, AgentOutput, AtprotoAgent};
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
-use crate::recordview::{Counter, CounterOutput};
+use crate::recordview::DescribeRepoView;
 use crate::types::*;
 
 pub(super) struct App {
     about_dialog: Controller<AboutDialog>,
     entry: gtk::EntryBuffer,
-    counters: FactoryVecDeque<Counter>,
+    views: AsyncFactoryVecDeque<DescribeRepoView>,
     created_widgets: u8,
     atp_client: AsyncController<AtprotoAgent>,
 }
@@ -46,15 +47,15 @@ pub(super) struct App {
 #[derive(Debug)]
 pub enum AppMsg {
     DisplayOverview,
-    AddCounter,
-    RemoveCounter,
-    SendFront(DynamicIndex),
-    MoveUp(DynamicIndex),
-    MoveDown(DynamicIndex),
+    // AddCounter,
+    // RemoveCounter,
+    // SendFront(DynamicIndex),
+    // MoveUp(DynamicIndex),
+    // MoveDown(DynamicIndex),
     Retrieve,
     // TabForRecord(com::atproto::repo::get_record::OutputData),
     // TabForRecords(com::atproto::repo::list_records::OutputData),
-    // TabForRepo(com::atproto::repo::describe_repo::OutputData),
+    TabForRepo(com::atproto::repo::describe_repo::OutputData),
     NotImplemented,
     Quit,
 }
@@ -83,7 +84,7 @@ relm4::new_stateless_action!(AboutAction, WindowActionGroup, "about");
 #[relm4::component(pub, async)]
 impl AsyncComponent for App {
     type CommandOutput = AppCommand;
-    type Init = u8;
+    type Init = ();
     type Input = AppMsg;
     type Output = ();
     type Widgets = AppWidgets;
@@ -131,15 +132,15 @@ impl AsyncComponent for App {
                     set_orientation: gtk::Orientation::Vertical,
 
                     adw::HeaderBar {
-                        pack_start = &gtk::Button {
-                            set_label: "Add",
-                            connect_clicked => AppMsg::AddCounter,
-                        },
+                        // pack_start = &gtk::Button {
+                        //     set_label: "Add",
+                        //     connect_clicked => AppMsg::AddCounter,
+                        // },
 
-                        pack_start = &gtk::Button {
-                            set_label: "Remove",
-                            connect_clicked => AppMsg::RemoveCounter,
-                        },
+                        // pack_start = &gtk::Button {
+                        //     set_label: "Remove",
+                        //     connect_clicked => AppMsg::RemoveCounter,
+                        // },
                         #[wrap(Some)]
                         set_title_widget = &gtk::Box {
                             #[name(search_entry)]
@@ -186,18 +187,23 @@ impl AsyncComponent for App {
             .launch(())
             .detach();
 
-        let counters = FactoryVecDeque::builder()
+        // let counters = FactoryVecDeque::builder()
+        //     .launch(adw::TabView::default())
+        //     .forward(sender.input_sender(), |output| match output {
+        //         CounterOutput::SendFront(index) => AppMsg::SendFront(index),
+        //         CounterOutput::MoveUp(index) => AppMsg::MoveUp(index),
+        //         CounterOutput::MoveDown(index) => AppMsg::MoveDown(index),
+        //     });
+        let views = AsyncFactoryVecDeque::builder()
             .launch(adw::TabView::default())
             .forward(sender.input_sender(), |output| match output {
-                CounterOutput::SendFront(index) => AppMsg::SendFront(index),
-                CounterOutput::MoveUp(index) => AppMsg::MoveUp(index),
-                CounterOutput::MoveDown(index) => AppMsg::MoveDown(index),
+                _ => AppMsg::NotImplemented,
             });
         let model = Self {
             about_dialog,
             entry: gtk::EntryBuffer::default(),
-            created_widgets: counter,
-            counters,
+            created_widgets: 0,
+            views,
             atp_client: AtprotoAgent::builder().launch(()).forward(
                 sender.input_sender(),
                 |output| match output {
@@ -211,7 +217,7 @@ impl AsyncComponent for App {
                     }
                     AgentOutput::Repo(repo) => {
                         println!("repo: {:?}", repo);
-                        AppMsg::NotImplemented
+                        AppMsg::TabForRepo(repo)
                     }
                     AgentOutput::DidDoc(did_doc) => {
                         println!("did_doc: {:?}", did_doc);
@@ -229,7 +235,7 @@ impl AsyncComponent for App {
             ),
         };
 
-        let tab_view = model.counters.widget();
+        let tab_view = model.views.widget();
 
         let widgets = view_output!();
 
@@ -265,10 +271,8 @@ impl AsyncComponent for App {
         sender: AsyncComponentSender<Self>,
         root: &Self::Root,
     ) {
-        let mut counters_guard = self.counters.guard();
+        let mut counters_guard = self.views.guard();
 
-        // in the future it might be best to move from creating oneshots every command to having mpsc channels for each command
-        // for now, this is fine
         match message {
             AppMsg::Retrieve => {
                 if let Ok(uri) = self.entry.text().to_string().parse::<AtUri>() {
@@ -280,30 +284,9 @@ impl AsyncComponent for App {
             AppMsg::DisplayOverview => {
                 widgets.tab_overview.set_open(true);
             }
-            AppMsg::AddCounter => {
-                counters_guard.push_back(self.created_widgets);
+            AppMsg::TabForRepo(repo) => {
+                counters_guard.push_back(repo);
                 self.created_widgets = self.created_widgets.wrapping_add(1);
-            }
-            AppMsg::RemoveCounter => {
-                counters_guard.pop_back();
-            }
-            AppMsg::SendFront(index) => {
-                counters_guard.move_front(index.current_index());
-            }
-            AppMsg::MoveDown(index) => {
-                let index = index.current_index();
-                let new_index = index + 1;
-                // Already at the end?
-                if new_index < counters_guard.len() {
-                    counters_guard.move_to(index, new_index);
-                }
-            }
-            AppMsg::MoveUp(index) => {
-                let index = index.current_index();
-                // Already at the start?
-                if index != 0 {
-                    counters_guard.move_to(index, index - 1);
-                }
             }
             AppMsg::NotImplemented => println!("not implemented"),
             AppMsg::Quit => main_application().quit(),

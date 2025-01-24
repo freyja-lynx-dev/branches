@@ -159,7 +159,6 @@ dependencies = [
  "relm4",
  "reqwest",
  "serde_json",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
