@@ -5,6 +5,7 @@ mod api;
 mod app;
 mod modals;
 mod recordview;
+mod templates;
 mod types;
 
 use config::{APP_ID, GETTEXT_PACKAGE, LOCALEDIR, RESOURCES_FILE};

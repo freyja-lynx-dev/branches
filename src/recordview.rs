@@ -1,5 +1,6 @@
 use std::fmt::Error;
 
+use crate::templates::AppBskyFeedPost;
 use crate::types::AtUri;
 use atrium_api::did_doc::*;
 use atrium_api::types::string::{Cid, Did, Handle, Nsid};
@@ -12,22 +13,97 @@ use relm4::{gtk, Component, ComponentParts, ComponentSender};
 use relm4::{prelude::*, AsyncFactorySender};
 use types::TryFromUnknown;
 
-// #[derive(Debug)]
-// pub struct GetRecordView {
-//     uri: AtUri,
-//     cid: Option<Cid>,
-//     value: AtUnknown,
-// }
+#[derive(Debug)]
+enum RecordViewError {
+    NullRecord,
+    Other,
+}
 
-// #[relm4::component(async)]
-// impl SimpleAsyncComponent for GetRecordView {
-//     view! {
-//         gtk::ListBox {
-//             set_hexpand: true,
-//             set_margin_all: 10,
-//         }
-//     }
-// }
+#[derive(Debug)]
+pub struct GetRecordView {
+    uri: AtUri,
+    cid: Option<Cid>,
+    value: AtUnknown,
+}
+
+#[relm4::factory(async, pub)]
+impl AsyncFactoryComponent for GetRecordView {
+    type Init = com::atproto::repo::get_record::OutputData;
+    type Input = ();
+    type Output = ();
+    type CommandOutput = ();
+    type ParentWidget = adw::TabView;
+
+    view! {
+        gtk::Box {
+            #[name(post)]
+            #[template]
+            AppBskyFeedPost,
+        }
+    }
+
+    async fn init_model(
+        value: Self::Init,
+        _index: &DynamicIndex,
+        _sender: AsyncFactorySender<Self>,
+    ) -> Self {
+        Self {
+            uri: value
+                .uri
+                .parse::<AtUri>()
+                .expect("record uri is somehow invalid despite being retrieved from the PDS"),
+            cid: value.cid,
+            value: value.value,
+        }
+    }
+    fn init_widgets(
+        &mut self,
+        _index: &DynamicIndex,
+        root: Self::Root,
+        _returned_widget: &<Self::ParentWidget as FactoryView>::ReturnedWidget,
+        _sender: AsyncFactorySender<Self>,
+    ) -> Self::Widgets {
+        let widgets = view_output!();
+
+        if let Ok(record) = match &self.value {
+            AtUnknown::Object(o) => Ok(o),
+            AtUnknown::Null => Err(RecordViewError::NullRecord),
+            AtUnknown::Other(_) => Err(RecordViewError::Other),
+        } {
+            if let Ok(text) = serde_json::to_string(
+                record
+                    .get("text")
+                    .expect("did not get a valid datamodel from record text"),
+            ) {
+                widgets.post.text.key.set_text("text");
+                widgets.post.text.value.set_text(text.as_str());
+            }
+
+            if let Ok(t) = serde_json::to_string(
+                record
+                    .get("$type")
+                    .expect("did not get a valid datamodel from record type"),
+            ) {
+                widgets.post.r#type.key.set_text("type");
+                widgets.post.r#type.value.set_text(t.as_str());
+            }
+
+            // we're not doing the nested ones yet
+
+            if let Ok(created_at) = serde_json::to_string(
+                record
+                    .get("createdAt")
+                    .expect("did not get a valid datamodel from record createdAt"),
+            ) {
+                widgets.post.created_at.key.set_text("createdAt");
+                widgets.post.created_at.value.set_text(created_at.as_str());
+            }
+        } else {
+            panic!("we don't know what to do here: {:?}", self.value);
+        }
+        widgets
+    }
+}
 
 #[derive(Debug)]
 pub struct DescribeRepoView {
@@ -220,6 +296,50 @@ impl AsyncFactoryComponent for DescribeRepoView {
 pub struct ListRecordsView {
     cursor: Option<String>,
     records: Vec<com::atproto::repo::list_records::Record>,
+}
+
+#[relm4::factory(async, pub)]
+impl AsyncFactoryComponent for ListRecordsView {
+    type Init = com::atproto::repo::list_records::OutputData;
+    type Input = ();
+    type Output = ();
+    type CommandOutput = ();
+    type ParentWidget = adw::TabView;
+    view! {
+        #[root]
+        gtk::ListBox {
+            set_hexpand: true,
+            set_margin_all: 10,
+            inline_css: "border-radius: 10px",
+        }
+    }
+
+    async fn init_model(
+        value: Self::Init,
+        _index: &DynamicIndex,
+        _sender: AsyncFactorySender<Self>,
+    ) -> Self {
+        Self {
+            cursor: value.cursor,
+            records: value.records,
+        }
+    }
+
+    fn init_widgets(
+        &mut self,
+        _index: &DynamicIndex,
+        root: Self::Root,
+        _returned_widget: &<Self::ParentWidget as FactoryView>::ReturnedWidget,
+        _sender: AsyncFactorySender<Self>,
+    ) -> Self::Widgets {
+        let widgets = view_output!();
+        for record in &self.records {
+            let row = adw::ActionRow::new();
+            row.set_title(&record.data.uri.to_string());
+            root.append(&row);
+        }
+        widgets
+    }
 }
 
 // impl RecordView {
