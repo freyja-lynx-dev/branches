@@ -154,9 +154,9 @@ impl AsyncComponent for AtprotoAgent {
     fn init_root() -> Self::Root {}
 
     async fn init(
-        init: Self::Init,
-        root: Self::Root,
-        sender: AsyncComponentSender<Self>,
+        _init: Self::Init,
+        _root: Self::Root,
+        _sender: AsyncComponentSender<Self>,
     ) -> AsyncComponentParts<Self> {
         let agent = AtpAgent::new(
             ReqwestClient::new("https://bsky.social"),

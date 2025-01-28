@@ -27,13 +27,13 @@ use atrium_api::*;
 use crate::agent::{AgentInput, AgentOutput, AtprotoAgent};
 use crate::config::{APP_ID, PROFILE};
 use crate::modals::about::AboutDialog;
-use crate::recordview::DescribeRepoView;
+use crate::recordview::GetRecordView;
 use crate::types::*;
 
 pub(super) struct App {
     about_dialog: Controller<AboutDialog>,
     entry: gtk::EntryBuffer,
-    views: AsyncFactoryVecDeque<DescribeRepoView>,
+    views: AsyncFactoryVecDeque<GetRecordView>,
     created_widgets: u8,
     atp_client: AsyncController<AtprotoAgent>,
 }
@@ -53,8 +53,8 @@ pub enum AppMsg {
     // MoveUp(DynamicIndex),
     // MoveDown(DynamicIndex),
     Retrieve,
-    // TabForRecord(com::atproto::repo::get_record::OutputData),
-    // TabForRecords(com::atproto::repo::list_records::OutputData),
+    TabForRecord(com::atproto::repo::get_record::OutputData),
+    TabForRecords(com::atproto::repo::list_records::OutputData),
     TabForRepo(com::atproto::repo::describe_repo::OutputData),
     NotImplemented,
     Quit,
@@ -132,15 +132,6 @@ impl AsyncComponent for App {
                     set_orientation: gtk::Orientation::Vertical,
 
                     adw::HeaderBar {
-                        // pack_start = &gtk::Button {
-                        //     set_label: "Add",
-                        //     connect_clicked => AppMsg::AddCounter,
-                        // },
-
-                        // pack_start = &gtk::Button {
-                        //     set_label: "Remove",
-                        //     connect_clicked => AppMsg::RemoveCounter,
-                        // },
                         #[wrap(Some)]
                         set_title_widget = &gtk::Box {
                             #[name(search_entry)]
@@ -209,11 +200,11 @@ impl AsyncComponent for App {
                 |output| match output {
                     AgentOutput::Record(record) => {
                         println!("record: {:?}", record);
-                        AppMsg::NotImplemented
+                        AppMsg::TabForRecord(record)
                     }
                     AgentOutput::Records(records) => {
                         println!("records: {:?}", records);
-                        AppMsg::NotImplemented
+                        AppMsg::TabForRecords(records)
                     }
                     AgentOutput::Repo(repo) => {
                         println!("repo: {:?}", repo);
@@ -284,9 +275,19 @@ impl AsyncComponent for App {
             AppMsg::DisplayOverview => {
                 widgets.tab_overview.set_open(true);
             }
-            AppMsg::TabForRepo(repo) => {
-                counters_guard.push_back(repo);
+            AppMsg::TabForRecord(record) => {
+                counters_guard.push_back(record);
                 self.created_widgets = self.created_widgets.wrapping_add(1);
+            }
+            AppMsg::TabForRecords(records) => {
+                dbg!("we're not worrying about this for now");
+                // counters_guard.push_back(records);
+                // self.created_widgets = self.created_widgets.wrapping_add(1);
+            }
+            AppMsg::TabForRepo(repo) => {
+                dbg!("we're not worrying about this for now");
+                // counters_guard.push_back(repo);
+                // self.created_widgets = self.created_widgets.wrapping_add(1);
             }
             AppMsg::NotImplemented => println!("not implemented"),
             AppMsg::Quit => main_application().quit(),
